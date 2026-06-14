@@ -1,9 +1,8 @@
 # Integration Cookbook: SuperInstance MCP Server
 
-> **Practical recipes for connecting the SuperInstance fleet to any system via MCP.**
+> **Practical recipes for connecting conservation-law governance to any system.**
 
 ---
-
 ## Table of Contents
 
 1. [Recipe: GitHub Actions CI Gate](#recipe-github-actions-ci-gate)
@@ -15,10 +14,17 @@
 7. [Recipe: Kubernetes Admission Controller](#recipe-kubernetes-admission-controller)
 8. [Recipe: Python Async Fleet Manager](#recipe-python-async-fleet-manager)
 9. [Recipe: Rust Fleet Client](#recipe-rust-fleet-client)
-10. [Recipe: Monitoring Stack (Grafana)](#recipe-monitoring-stack-grafana)
+10. [Recipe: Monitoring Stack (Grafana/Prometheus)](#recipe-monitoring-stack-grafanaprometheus)
 11. [Recipe: Conservation-Aware Claude Code Workflow](#recipe-conservation-aware-claude-code-workflow)
 12. [Recipe: Multi-Agent Task Distribution](#recipe-multi-agent-task-distribution)
 13. [Recipe: Embedding in a Go Binary](#recipe-embedding-in-a-go-binary)
+14. [Recipe: OpenAI Agents SDK Fleet Agent](#recipe-openai-agents-sdk-fleet-agent)
+15. [Recipe: LangGraph Conservation Node](#recipe-langgraph-conservation-node)
+16. [Recipe: CrewAI Fleet Crew](#recipe-crewai-fleet-crew)
+17. [Recipe: AutoGen Conversational Fleet](#recipe-autogen-conversational-fleet)
+18. [Recipe: Shell Script Fleet CLI](#recipe-shell-script-fleet-cli)
+19. [Recipe: Cursor Fleet Rules](#recipe-cursor-fleet-rules)
+20. [Recipe: Cline Auto-Approve Fleet](#recipe-cline-auto-approve-fleet)
 
 ---
 
@@ -952,6 +958,435 @@ func main() {
 		result.Valid, result.Delta, result.Message)
 }
 ```
+
+---
+
+---
+
+## Recipe: OpenAI Agents SDK Fleet Agent
+
+**Goal:** A production fleet-coordinating agent using OpenAI's Agents SDK with MCP tools.
+
+```python
+"""
+OpenAI Agents SDK agent that governs a fleet via SuperInstance MCP tools.
+Requires: pip install openai-agents mcp
+"""
+import asyncio
+from agents import Agent, Runner
+from agents.mcp import MCPServerStdio
+
+FLEET_MCP_PATH = "/path/to/superinstance-mcp/src/index.ts"
+
+async def main():
+    # Connect to MCP server
+    fleet = MCPServerStdio(
+        command="npx",
+        args=["tsx", FLEET_MCP_PATH],
+        cache_tools_list=True,
+    )
+    await fleet.connect()
+
+    # Fleet Governor agent
+    governor = Agent(
+        name="Fleet Governor",
+        instructions="""You are the governor of a SuperInstance fleet.
+
+        PROTOCOL:
+        1. Always call fleet_status first to assess fleet health
+        2. Before proposing any task, call conservation_check to verify it fits
+        3. Use fleet_search to find existing solutions before writing new code
+        4. Use ternary_validate on any signal data
+        5. If conservation is violated (δ < 0), recommend reducing scope
+
+        CONSERVATION LAW:
+        γ + η ≤ C where C = log₂(3) ≈ 1.585
+        γ = coordination cost, η = value produced
+        """,
+        mcp_servers=[fleet],
+        model="o4-mini",
+    )
+
+    # Run fleet assessment
+    result = await Runner.run(
+        governor,
+        "Assess the fleet and recommend what work we should prioritize.",
+    )
+    print(result.final_output)
+
+    await fleet.cleanup()
+
+asyncio.run(main())
+```
+
+---
+
+## Recipe: LangGraph Conservation Node
+
+**Goal:** Add a conservation-check node to any LangGraph workflow.
+
+```python
+"""
+LangGraph workflow with conservation-law gating.
+Requires: pip install langgraph langchain-mcp-adapters
+"""
+from langgraph.graph import StateGraph, END
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from typing import TypedDict, Annotated
+import operator
+
+class WorkflowState(TypedDict):
+    task: str
+    gamma: float
+    eta: float
+    conservation_ok: bool
+    result: str
+
+async def create_conservation_gated_workflow():
+    # MCP client
+    mcp = MultiServerMCPClient({
+        "superinstance": {
+            "command": "npx",
+            "args": ["tsx", "/path/to/superinstance-mcp/src/index.ts"],
+            "transport": "stdio",
+        }
+    })
+    tools = await mcp.get_tools()
+
+    # Find our tools by name
+    conservation_check = next(t for t in tools if t.name == "conservation_check")
+    fleet_search = next(t for t in tools if t.name == "fleet_search")
+
+    async def conservation_gate(state: WorkflowState) -> WorkflowState:
+        """Gate: block tasks that violate conservation law."""
+        result = await conservation_check.ainvoke({
+            "gamma": state["gamma"],
+            "eta": state["eta"],
+        })
+        import json
+        data = json.loads(result)
+        return {"conservation_ok": data["valid"]}
+
+    async def search_patterns(state: WorkflowState) -> WorkflowState:
+        """Search fleet for existing solutions."""
+        result = await fleet_search.ainvoke({
+            "query": state["task"],
+            "topK": 3,
+        })
+        return {"result": result}
+
+    async def execute_task(state: WorkflowState) -> WorkflowState:
+        """Execute the actual task."""
+        return {"result": f"Executed: {state['task']}"}
+
+    async def reject(state: WorkflowState) -> WorkflowState:
+        return {"result": "❌ Blocked: conservation law violation"}
+
+    # Build graph
+    workflow = StateGraph(WorkflowState)
+    workflow.add_node("gate", conservation_gate)
+    workflow.add_node("search", search_patterns)
+    workflow.add_node("execute", execute_task)
+    workflow.add_node("reject", reject)
+
+    workflow.set_entry_point("gate")
+    workflow.add_conditional_edges("gate", lambda s: "search" if s["conservation_ok"] else "reject")
+    workflow.add_edge("search", "execute")
+    workflow.add_edge("execute", END)
+    workflow.add_edge("reject", END)
+
+    return workflow.compile()
+```
+
+---
+
+## Recipe: CrewAI Fleet Crew
+
+**Goal:** A CrewAI crew where each agent respects conservation bounds.
+
+```python
+"""
+CrewAI crew with SuperInstance conservation governance.
+Requires: pip install crewai
+"""
+from crewai import Agent, Task, Crew, Process
+from crewai.tools import BaseTool
+import subprocess, json
+
+MCP_PATH = "/path/to/superinstance-mcp/src/index.ts"
+
+class FleetTool(BaseTool):
+    """Base class for MCP-backed CrewAI tools."""
+    tool_name: str = ""
+
+    def _run(self, **kwargs) -> str:
+        payload = json.dumps({
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": self.tool_name, "arguments": kwargs},
+            "id": 1,
+        })
+        result = subprocess.run(
+            ["npx", "tsx", MCP_PATH],
+            input=payload, capture_output=True, text=True, timeout=10,
+        )
+        response = json.loads(result.stdout)
+        return response["result"]["content"][0]["text"]
+
+class FleetStatusTool(FleetTool):
+    name: str = "fleet_status"
+    description: str = "Get current fleet γ/η/C balance and agent count"
+    tool_name: str = "fleet_status"
+
+class ConservationCheckTool(FleetTool):
+    name: str = "conservation_check"
+    description: str = "Check if gamma + eta <= C (log2(3)). Pass gamma and eta values."
+    tool_name: str = "conservation_check"
+
+class FleetSearchTool(FleetTool):
+    name: str = "fleet_search"
+    description: str = "Search fleet knowledge for existing patterns. Pass query string."
+    tool_name: str = "fleet_search"
+
+# Create crew
+governor = Agent(
+    role="Fleet Governor",
+    goal="Ensure all work respects conservation law γ + η ≤ C",
+    backstory="Physics-grounded fleet governance agent.",
+    tools=[FleetStatusTool(), ConservationCheckTool()],
+    verbose=True,
+)
+
+researcher = Agent(
+    role="Fleet Researcher",
+    goal="Find existing solutions before writing new code",
+    backstory="Knowledge retrieval specialist for the fleet.",
+    tools=[FleetSearchTool()],
+    verbose=True,
+)
+
+status_task = Task(
+    description="Check fleet status and verify we have capacity for new work",
+    agent=governor,
+    expected_output="Fleet status with conservation verdict",
+)
+
+research_task = Task(
+    description="Search for existing rate limiter and circuit breaker patterns",
+    agent=researcher,
+    expected_output="Ranked list of relevant fleet crates",
+)
+
+crew = Crew(
+    agents=[governor, researcher],
+    tasks=[status_task, research_task],
+    process=Process.sequential,
+)
+result = crew.kickoff()
+print(result)
+```
+
+---
+
+## Recipe: AutoGen Conversational Fleet
+
+**Goal:** Multi-agent conversation where agents debate within conservation bounds.
+
+```python
+"""
+AutoGen group chat with conservation-law governance.
+Requires: pip install pyautogen
+"""
+import autogen
+import subprocess, json
+
+MCP_PATH = "/path/to/superinstance-mcp/src/index.ts"
+
+def mcp_call(tool_name: str, args: dict = None) -> str:
+    """Call MCP server from within any Python agent."""
+    payload = json.dumps({
+        "jsonrpc": "2.0", "method": "tools/call",
+        "params": {"name": tool_name, "arguments": args or {}},
+        "id": 1,
+    })
+    r = subprocess.run(
+        ["npx", "tsx", MCP_PATH],
+        input=payload, capture_output=True, text=True, timeout=10,
+    )
+    return json.loads(r.stdout)["result"]["content"][0]["text"]
+
+# Governor config
+governor_config = {
+    "name": "governor",
+    "system_message": f"""You are the fleet governor.
+    Before approving any proposal, check conservation.
+    Current fleet status: {mcp_call('fleet_status')}
+    Conservation law: γ + η ≤ C where C = log₂(3) ≈ 1.585.
+    Reject any proposal that violates this.""",
+}
+
+builder_config = {
+    "name": "builder",
+    "system_message": "You propose technical solutions. Always search the fleet first: '
+        + str(mcp_call('fleet_search', {'query': 'architecture patterns', 'topK': 3}))
+        + '. After proposing, ask the governor for conservation approval.'",
+}
+
+# Create agents
+governor = autogen.ConversableAgent(
+    governor_config["name"],
+    llm_config={"config_list": [{"model": "gpt-4o"}]},
+    system_message=governor_config["system_message"],
+)
+
+builder = autogen.ConversableAgent(
+    builder_config["name"],
+    llm_config={"config_list": [{"model": "gpt-4o"}]},
+    system_message=builder_config["system_message"],
+)
+
+# Group chat
+groupchat = autogen.GroupChat(
+    agents=[governor, builder], messages=[], max_round=10,
+)
+manager = autogen.GroupChatManager(groupchat=groupchat)
+
+builder.initiate_chat(manager, message="I want to add a new rate limiter service.")
+```
+
+---
+
+## Recipe: Shell Script Fleet CLI
+
+**Goal:** Use the MCP server from any shell script, CI pipeline, or terminal.
+
+```bash
+#!/usr/bin/env bash
+# fleet-cli.sh — SuperInstance fleet CLI backed by MCP server
+# Usage: ./fleet-cli.sh <command> [args]
+
+MCP_SERVER="npx tsx /path/to/superinstance-mcp/src/index.ts"
+
+call_mcp() {
+  local tool="$1"
+  local args="${2:-{}}"
+  echo "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args},\"id\":1}" | \
+    $MCP_SERVER 2>/dev/null | jq -r '.result.content[0].text'
+}
+
+case "$1" in
+  status)
+    call_mcp fleet_status '{}' | jq .
+    ;;
+  search)
+    call_mcp fleet_search "{\"query\":\"$2\",\"topK\":3}" | jq .
+    ;;
+  check)
+    # check <gamma> <eta>
+    call_mcp conservation_check "{\"gamma\":$2,\"eta\":$3}" | jq .
+    ;;
+  budget)
+    # budget <gamma_used> <eta_produced>
+    call_mcp fleet_budget "{\"gamma_used\":$2,\"eta_produced\":$3}" | jq .
+    ;;
+  ternary)
+    # ternary 1 -1 0 1 0.5
+    shift
+    VALUES=$(printf '%s\n' "$@" | jq -R . | jq -s .)
+    call_mcp ternary_validate "{\"values\":$VALUES}" | jq .
+    ;;
+  agents)
+    call_mcp fleet_agents '{}' | jq .
+    ;;
+  stats)
+    call_mcp ecosystem_stats '{}' | jq .
+    ;;
+  crate)
+    call_mcp crate_info "{\"name\":\"$2\"}" | jq .
+    ;;
+  *)
+    echo "Commands: status, search <q>, check <γ> <η>, budget <γ> <η>,"
+    echo "          ternary <vals...>, agents, stats, crate <name>"
+    exit 1
+    ;;
+esac
+```
+
+Usage:
+```bash
+./fleet-cli.sh status
+./fleet-cli.sh search "rate limiter"
+./fleet-cli.sh check 0.9 0.5
+./fleet-cli.sh ternary 1 -1 0 1 0.5
+./fleet-cli.sh crate shoal
+```
+
+---
+
+## Recipe: Cursor Fleet Rules
+
+**Goal:** Make Cursor automatically use fleet tools when you're coding.
+
+```bash
+# 1. Install MCP server for Cursor
+cp .mcp.json ~/.cursor/mcp.json
+
+# 2. Create project rules
+cat > /your/project/.cursorrules << 'EOF'
+## SuperInstance Fleet Rules
+
+This project uses conservation-law governance (γ + η ≤ C).
+
+BEFORE writing code:
+- Call fleet_search to find existing patterns
+- Call crate_info for any referenced SuperInstance crate
+
+AFTER writing code:
+- Call conservation_check with estimated γ/η impact
+- Call ternary_validate on signal-processing code
+
+NEVER propose architectures where γ + η > log₂(3) ≈ 1.585.
+
+COMMIT messages must include conservation status:
+  feat: add rate limiter [γ=0.12 η=0.08 δ=1.38 ✅]
+EOF
+
+# 3. Restart Cursor — tools auto-appear in chat
+```
+
+---
+
+## Recipe: Cline Auto-Approve Fleet
+
+**Goal:** Configure Cline (VS Code) to auto-call fleet tools without confirmation.
+
+```json
+// VS Code settings.json
+{
+  "cline.mcpServers": {
+    "superinstance": {
+      "command": "npx",
+      "args": ["tsx", "/absolute/path/to/superinstance-mcp/src/index.ts"],
+      "disabled": false,
+      "autoApprove": [
+        "fleet_status",
+        "fleet_search",
+        "fleet_budget",
+        "conservation_check",
+        "ternary_validate",
+        "crate_info",
+        "fleet_agents",
+        "ecosystem_stats"
+      ]
+    }
+  },
+  "cline.allowedCommands": [
+    "npx tsx"
+  ]
+}
+```
+
+With `autoApprove`, Cline calls these tools without prompting — making the fleet awareness seamless. Cline will automatically check fleet status, search for patterns, and validate conservation without you asking.
 
 ---
 

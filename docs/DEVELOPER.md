@@ -1,6 +1,6 @@
 # Developer Guide: SuperInstance MCP Server
 
-> **Complete guide for developers integrating, extending, and building on the SuperInstance MCP Server.**
+> **Complete guide for developers integrating the conservation-law governance layer with any agent framework, extending the tool server, and building production fleet systems.**
 
 ---
 
@@ -10,14 +10,15 @@
 2. [Server Internals: How It Works](#2-server-internals-how-it-works)
 3. [Tool Development Guide](#3-tool-development-guide)
 4. [Integration Patterns by Platform](#4-integration-patterns-by-platform)
-5. [Connecting Custom Backends](#5-connecting-custom-backends)
-6. [Conservation Law API Contract](#6-conservation-law-api-contract)
-7. [Testing & Validation](#7-testing--validation)
-8. [Performance & Resource Budgeting](#8-performance--resource-budgeting)
-9. [Security Model](#9-security-model)
-10. [Troubleshooting & Debugging](#10-troubleshooting--debugging)
-11. [Migration & Versioning](#11-migration--versioning)
-12. [Appendix: Complete Tool Schemas](#12-appendix-complete-tool-schemas)
+5. [Agent Framework Integration (SDK Clients)](#5-agent-framework-integration-sdk-clients)
+6. [Connecting Custom Backends](#6-connecting-custom-backends)
+7. [Conservation Law API Contract](#7-conservation-law-api-contract)
+8. [Testing & Validation](#8-testing--validation)
+9. [Performance & Resource Budgeting](#9-performance--resource-budgeting)
+10. [Security Model](#10-security-model)
+11. [Troubleshooting & Debugging](#11-troubleshooting--debugging)
+12. [Migration & Versioning](#12-migration--versioning)
+13. [Appendix: Complete Tool Schemas](#13-appendix-complete-tool-schemas)
 
 ---
 
@@ -550,7 +551,119 @@ async fn main() -> anyhow::Result<()> {
 
 ---
 
-## 5. Connecting Custom Backends
+## 5. Agent Framework Integration (SDK Clients)
+
+For frameworks without native MCP toolbars, use the SDK client libraries. The pattern is always:
+
+1. Create MCP client connection
+2. Call `initialize()` to handshake
+3. Call `tools/list` to discover tools
+4. Call `tools/call` to invoke
+
+### OpenAI Agents SDK
+
+```python
+from agents import Agent, Runner
+from agents.mcp import MCPServerStdio
+
+fleet = MCPServerStdio(command="npx", args=["tsx", MCP_PATH])
+await fleet.connect()
+
+agent = Agent(
+    name="Fleet Worker",
+    instructions="Check conservation before any action.",
+    mcp_servers=[fleet],
+)
+result = await Runner.run(agent, "Assess fleet health")
+```
+
+### LangGraph
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+
+client = MultiServerMCPClient({"superinstance": {"command": "npx", "args": [...]}})
+tools = await client.get_tools()
+# Use as LangChain tools in any chain/graph
+```
+
+### CrewAI
+
+```python
+from crewai.tools import BaseTool
+
+class ConservationTool(BaseTool):
+    name = "conservation_check"
+    description = "Verify γ + η ≤ C"
+    def _run(self, gamma: float, eta: float) -> str:
+        # subprocess call to MCP server
+        ...
+```
+
+### AutoGen
+
+```python
+import autogen
+
+governor = autogen.ConversableAgent("governor", llm_config=...)
+governor.register_function(
+    function_map={
+        "conservation_check": lambda g, e: mcp_call("conservation_check", {"gamma": g, "eta": e}),
+        "fleet_search": lambda q: mcp_call("fleet_search", {"query": q}),
+    }
+)
+```
+
+### Raw Python (no framework)
+
+```python
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+params = StdioServerParameters(command="npx", args=["tsx", MCP_PATH])
+async with stdio_client(params) as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        result = await session.call_tool("fleet_status", {})
+```
+
+### Key Pattern: Tool-to-Function Mapping
+
+When integrating with frameworks that expect Python functions rather than MCP tools,
+use a generic wrapper:
+
+```python
+import subprocess, json
+
+class MCPBridge:
+    """Universal MCP-to-Python bridge."""
+    def __init__(self, server_path: str):
+        self.server_path = server_path
+
+    def call(self, tool_name: str, **kwargs) -> dict:
+        payload = json.dumps({
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": kwargs},
+            "id": 1,
+        })
+        result = subprocess.run(
+            ["npx", "tsx", self.server_path],
+            input=payload, capture_output=True, text=True, timeout=10,
+        )
+        response = json.loads(result.stdout)
+        return json.loads(response["result"]["content"][0]["text"])
+
+    # Expose as methods for easy autocompletion
+    def fleet_status(self): return self.call("fleet_status")
+    def fleet_search(self, query, topK=5): return self.call("fleet_search", query=query, topK=topK)
+    def conservation_check(self, gamma, eta): return self.call("conservation_check", gamma=gamma, eta=eta)
+    def ternary_validate(self, values): return self.call("ternary_validate", values=values)
+```
+
+---
+
+## 6. Connecting Custom Backends
 
 The MCP server can connect to any HTTP backend. Here's how to wire up a new data source:
 
@@ -632,7 +745,7 @@ GET /stats
 
 ---
 
-## 6. Conservation Law API Contract
+## 7. Conservation Law API Contract
 
 All tools that return conservation data follow this shape:
 
@@ -694,7 +807,7 @@ function withConservation<T extends Record<string, unknown>>(
 
 ---
 
-## 7. Testing & Validation
+## 8. Testing & Validation
 
 ### Manual Testing
 
@@ -775,7 +888,7 @@ npx tsc --noEmit  # Should pass with zero errors
 
 ---
 
-## 8. Performance & Resource Budgeting
+## 9. Performance & Resource Budgeting
 
 ### Memory Footprint
 
@@ -810,7 +923,7 @@ The bottleneck is always the AI, not the server. Don't optimize unless tool call
 
 ---
 
-## 9. Security Model
+## 10. Security Model
 
 ### What the Server Can Do
 
@@ -863,7 +976,7 @@ async function handleFleetDeploy(name: string, script: string) {
 
 ---
 
-## 10. Troubleshooting & Debugging
+## 11. Troubleshooting & Debugging
 
 ### Enable Verbose Logging
 
@@ -942,7 +1055,7 @@ echo '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-1
 
 ---
 
-## 11. Migration & Versioning
+## 12. Migration & Versioning
 
 ### Version Policy
 
@@ -975,7 +1088,7 @@ Adding optional parameters is non-breaking. Removing or renaming parameters is b
 
 ---
 
-## 12. Appendix: Complete Tool Schemas
+## 13. Appendix: Complete Tool Schemas
 
 <details>
 <summary>Click to expand all 8 tool JSON schemas</summary>
