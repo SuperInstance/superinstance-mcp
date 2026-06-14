@@ -148,6 +148,14 @@ Any system can use the server via raw JSON-RPC or by calling the underlying flee
 
 ## Quick Start (5 Minutes)
 
+### Option A: npx (no install)
+```bash
+# Run directly — no clone needed
+npx superinstance-mcp
+# Output: [SuperInstance MCP] Server started — 8 tools available
+```
+
+### Option B: Clone and build
 ```bash
 # 1. Clone and install
 git clone https://github.com/SuperInstance/superinstance-mcp.git
@@ -155,12 +163,12 @@ cd superinstance-mcp
 npm install
 
 # 2. Verify the server works
-npx tsx src/index.ts
+npm run dev
 # Output: [SuperInstance MCP] Server started — 8 tools available
 
 # 3. Test a tool call (raw JSON-RPC)
 echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"conservation_check","arguments":{"gamma":0.8,"eta":0.5}},"id":1}' | \
-  npx tsx src/index.ts 2>/dev/null | python3 -m json.tool
+  npm run dev 2>/dev/null | python3 -m json.tool
 
 # 4. Install for your agent (pick one):
 ./install.sh                    # Claude Code (global)
@@ -179,6 +187,20 @@ cp .mcp.json ~/.cursor/mcp.json # Cursor
 ./install.sh
 # Writes to ~/.claude/.mcp.json
 ```
+
+**Using npx (no clone needed):**
+```json
+// ~/.claude/.mcp.json
+{
+  "mcpServers": {
+    "superinstance": {
+      "command": "npx",
+      "args": ["-y", "superinstance-mcp"]
+    }
+  }
+}
+```
+That's it — `npx superinstance-mcp` downloads and runs the published npm package.
 
 **Per-project:**
 ```bash
