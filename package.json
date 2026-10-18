@@ -1,6 +1,6 @@
 {
   "name": "superinstance-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Conservation-law-governed fleet intelligence for any AI agent via MCP",
   "type": "module",
   "main": "dist/index.js",
@@ -35,7 +35,7 @@
   "homepage": "https://github.com/SuperInstance/superinstance-mcp",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SuperInstance/superinstance-mcp.git"
+    "url": "git+https://github.com/SuperInstance/superinstance-mcp.git"
   },
   "license": "MIT",
   "files": [
@@ -45,5 +45,8 @@
     "docs/",
     ".mcp.json",
     "install.sh"
-  ]
+  ],
+  "bugs": {
+    "url": "https://github.com/SuperInstance/superinstance-mcp/issues"
+  }
 }
