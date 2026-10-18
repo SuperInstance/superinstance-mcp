@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "superinstance": {
+      "command": "npx",
+      "args": ["tsx", "/home/phoenix/repos/superinstance-mcp/src/index.ts"],
+      "env": {
+        "FLEET_API_URL": "https://fleet-dashboard-api.casey-digennaro.workers.dev",
+        "SHOAL_URL": "http://localhost:8787",
+        "VECTOR_API_URL": "https://fleet-vector-api.casey-digennaro.workers.dev"
+      }
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "name": "superinstance-mcp",
+  "version": "0.1.1",
+  "description": "Conservation-law-governed fleet intelligence for any AI agent via MCP",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "superinstance-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "fleet",
+    "conservation-law",
+    "ternary",
+    "claude-code",
+    "cursor",
+    "multi-agent",
+    "governance"
+  ],
+  "homepage": "https://github.com/SuperInstance/superinstance-mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SuperInstance/superinstance-mcp.git"
+  },
+  "license": "MIT",
+  "files": [
+    "dist/",
+    "src/",
+    "README.md",
+    "docs/",
+    ".mcp.json",
+    "install.sh"
+  ],
+  "bugs": {
+    "url": "https://github.com/SuperInstance/superinstance-mcp/issues"
+  }
+}
